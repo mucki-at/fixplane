@@ -5,13 +5,13 @@ schema_version = "1.0.0"
 id = "fix_plane"
 version = "1.0.0"
 name = "Fix Plane"
-tagline = "Make selected face planar, while also keeping adjacent planes planar."
-maintainer = "mucki"
+tagline = "Make faces flat in a smart way"
+maintainer = "mucki <fixplane@mucki.dev>"
 # Supported types: "add-on", "theme"
 type = "add-on"
 
 # Optional link to documentation, support, source files, etc
-# website = "https://extensions.blender.org/add-ons/my-example-package/"
+website = "https://github.com/mucki-at/fixplane"
 
 # Optional list defined by Blender and server, see:
 # https://docs.blender.org/manual/en/dev/advanced/extensions/tags.html

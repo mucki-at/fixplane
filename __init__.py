@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# fixplane - a blender extension to make faces planar in a smart way
+# Copyright (C) 2025 mucki
+# This file is part of fixplane. See LICENSE for copying conditions.
+
 import bpy
 import bmesh
 import mathutils
@@ -10,9 +14,23 @@ class FixPlaneOperator(bpy.types.Operator):
     bl_description = "Make selected face planar, while also keeping adjacent planes planar."
     bl_options = {'REGISTER', 'UNDO'}  # Enable undo for the operator.
 
+    type: bpy.props.EnumProperty(
+        name="Plane Type",
+        description="How to determine the plane we want to move points to.",
+        items=[
+            (geometry.BestFitType.NORMAL.name, "Plane normal", "Use the normal of the face to determine the plane. No regression is done, the plane is simply the plane defined by the face normal and the face center."),
+            (geometry.BestFitType.REGRESSION.name, "Best fit", "Use regression analysis with outlier detection to determine the plane."),
+        ],
+        default=geometry.BestFitType.REGRESSION.name
+    )
+
     threshold: bpy.props.FloatProperty(name="Threshold",
                                        description="Ignore vertices which are closer to the plane than this threshold.",
-                                       default=0.0001, min=0.0, precision=4)
+                                       default=0.0001, min=0.0, precision=4, unit='LENGTH',
+                                       subtype='DISTANCE')
+    outliers: bpy.props.FloatProperty(name="Outliers",
+                                       description="Maximum number of outliers to consider (as %% of total vertex count of face).",
+                                       default=25, min=0, max=100, precision=0, step=1, subtype='PERCENTAGE')
     fix_normal: bpy.props.BoolProperty(name="Fix Normal",
                                        description="Fix the normal of the face to the best fit plane normal.",
                                        default=True)
@@ -33,9 +51,11 @@ class FixPlaneOperator(bpy.types.Operator):
         if len(face.verts) <= 3:
             return {"FINISHED"}
 
-        fit_co, fit_no = geometry.best_fit_plane(face)
+        fit_co, fit_no = geometry.best_fit_plane(face, type=geometry.BestFitType[self.type], max_outliers=self.outliers / 100.0 * len(face.verts), threshold=self.threshold)
         self.report({'INFO'}, f"Fit coordinate: {fit_co}, Fit normal: {fit_no}.")
+
         skipped = 0
+        best_fit_cache = []
         for v in face.verts:
             dist = mathutils.geometry.distance_point_to_plane(v.co, fit_co, fit_no)
             if abs(dist) > self.threshold:
@@ -43,7 +63,11 @@ class FixPlaneOperator(bpy.types.Operator):
                 planes = [(fit_co, fit_no, len(face.verts))]
                 for f in v.link_faces:
                     if f != face:
-                        f_fit_co, f_fit_no = geometry.best_fit_plane(f)
+                        if f.index in best_fit_cache:
+                            f_fit_co, f_fit_no = best_fit_cache[f.index]
+                        else:
+                            f_fit_co, f_fit_no = geometry.best_fit_plane(f, type=geometry.BestFitType[self.type], max_outliers=self.outliers / 100.0 * len(f.verts), threshold=self.threshold)
+                            best_fit_cache.append((f.index, (f_fit_co, f_fit_no)))
                         planes.append((f_fit_co, f_fit_no, len(f.verts)))
 
                 # step two: intersect all planes to find the new vertex position

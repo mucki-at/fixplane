@@ -1,5 +1,6 @@
 {
     "blender.additionalArguments": [
         "${workspaceFolder}/example.blend"
-    ]
+    ],
+    "blender.addon.reloadOnSave": true
 }

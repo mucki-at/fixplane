@@ -1,5 +1,7 @@
-import math
-from re import X
+# fixplane - a blender extension to make faces planar in a smart way
+# Copyright (C) 2025 mucki
+# This file is part of fixplane. See LICENSE for copying conditions.
+
 import bmesh
 import mathutils
 import numpy as np
@@ -105,7 +107,7 @@ def determine_work_frame(face: bmesh.types.BMFace, type:WorkFrameType = WorkFram
     
     return work_co, work_frame
 
-def best_fit_plane(face: bmesh.types.BMFace, type:BestFitType = BestFitType.REGRESSION, max_outliers=0.25) -> tuple[mathutils.Vector, mathutils.Vector]:
+def best_fit_plane(face: bmesh.types.BMFace, type:BestFitType = BestFitType.REGRESSION, max_outliers:int=0, threshold:float=0.0001) -> tuple[mathutils.Vector, mathutils.Vector]:
     """
     Calculate the best fit plane for the face based on the work coordinate
     and work normal. This function uses a simple regression to find the best
@@ -114,12 +116,16 @@ def best_fit_plane(face: bmesh.types.BMFace, type:BestFitType = BestFitType.REGR
     Args:
         face (bmesh.types.BMFace): The face to calculate the best fit plane for.
         type (BestFitType): The type of best fit plane to use. Defaults to BestFitType.REGRESSION.
-        max_outliers (float): Maximum percentage of outlier points to remove during regression. Defaults to 25%.
+        max_outliers (int): Maximum number of outlier points to remove during regression. Defaults to 0.
+        threshold (float): The threshold for determining outliers. Defaults to 0.0001.
     
     Returns:
         tuple: A tuple containing the fit coordinate and fit normal.
     """
     
+    if max_outliers > len(face.verts) - 3:
+        max_outliers = len(face.verts) - 3  # Ensure we have at least 3 points left for regression
+
     if type == BestFitType.NORMAL:
         # If the type is NORMAL, we can use the face's normal directly
         fit_co = face.calc_center_median()
@@ -135,7 +141,7 @@ def best_fit_plane(face: bmesh.types.BMFace, type:BestFitType = BestFitType.REGR
  
     # four vertices is a special case, because each subset of three vertices is planar.
     # we use the distance of the fourth vertex to the plane defined by the first three vertices and make the one with the smallest distance the outlier
-    elif len(face.verts)==4 and max_outliers >= 0.25:
+    elif len(face.verts)==4 and max_outliers >= 1:
         fit_co = mathutils.Vector((0.0, 0.0, 0.0))
         fit_no = mathutils.Vector((0.0, 0.0, 1.0))
         min_distance = float('inf')
@@ -162,18 +168,39 @@ def best_fit_plane(face: bmesh.types.BMFace, type:BestFitType = BestFitType.REGR
 
         # Transform the vertices into the work coordinate system
         transformed_verts = [work_frame @ (v.co - work_co) for v in face.verts]
+
         X = np.array([[v.x, v.y, 1] for v in transformed_verts])
         Y = np.array([v.z for v in transformed_verts])
-        # Perform a least squares regression to find the best fit plane
-        # The plane equation is of the form z = ax + by + c, where a, b, and c are the coefficients
-        coeffs, residuals, rank, singular_values = np.linalg.lstsq(X, Y)
-        # coeffs[0] is the slope in x direction, coeffs[1] is the slope in y direction, and coeffs[2] is the intercept
 
+        # perform regression analysis to find the best fit plane
+        coeffs, residuals, rank, s = np.linalg.lstsq(X, Y, rcond=None)  # Least squares regression
         if rank < 3:
             raise ValueError(f"Failed to perform regression on face {face}. The rank of the matrix is {rank}, but it should be 3. The face is probably degenerate or has too few vertices.")
-        
-        # TODO: check for outliers and remove them if necessary
-        
+
+        # repeat the regression analysis until we have a good fit
+        threshold = threshold*threshold* len(face.verts)  # residuals are squared and summed, so we square the threshold as well and multiply by the number of vertices to get a reasonable threshold
+        outlier_count = 0
+        while (outlier_count < max_outliers) and (residuals[0] > threshold):
+            outlier = -1
+            for i in range(len(Y)):
+                X_test = np.delete(X, i, axis=0)
+                Y_test = np.delete(Y, i, axis=0)
+                test_coeffs, test_residuals, test_rank, test_s = np.linalg.lstsq(X_test,Y_test,rcond=None)  # Least squares regression
+                if test_rank == 3 and test_residuals < residuals:
+                    coeffs = test_coeffs
+                    residuals = test_residuals
+                    outlier = i
+            
+            if outlier >= 0:
+                # Remove the outlier from the data
+                X = np.delete(X, outlier, axis=0)
+                Y = np.delete(Y, outlier, axis=0)
+                outlier_count += 1
+            else:
+                # No more outliers found, break the loop
+                break
+
+
         # get matrix to transform back to the original coordinate system
         work_frame_inv = work_frame.inverted()
 
