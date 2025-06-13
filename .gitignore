@@ -1,2 +1,6 @@
-/example.blend1
 /__pycache__
+*.py[cod]
+.vscode/
+*.blend1
+
+fix_plane-1.0.0.zip
